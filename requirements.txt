@@ -1,0 +1,43 @@
+# Core Dependencies
+langchain>=0.1.0
+langgraph>=0.0.15
+langchain-openai>=0.0.8
+langchain-community>=0.0.10
+openai>=1.0.0
+
+# Web Framework
+fastapi>=0.95.0
+uvicorn>=0.21.0
+python-multipart>=0.0.6
+
+# Web Scraping & Data Processing
+crawl4ai>=0.5.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+
+# UI
+streamlit>=1.25.0
+streamlit-chat>=0.1.1
+
+# Utilities
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dateutil>=2.8.2
+
+
+
+# Development
+black>=23.3.0
+isort>=5.12.0
+mypy>=1.0.0
+types-python-dateutil>=2.8.0
+
+# Database
+sqlalchemy>=2.0.0
+alembic>=1.11.0
+
+# Async
+anyio>=3.6.2
+httpx>=0.24.0
