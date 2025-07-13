@@ -1,5 +1,7 @@
 # AI Strategy Assistant
 
+![Project Architecture](assets/images/IMG-20250629-WA0000.jpg)
+
 An AI-powered tool that helps you plan and architect software projects by generating comprehensive project plans, technical architectures, and gathering feedback from different stakeholder personas.
 
 > **Recent Updates**
