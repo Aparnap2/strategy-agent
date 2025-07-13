@@ -53,7 +53,7 @@ class ClientPersonaAgent:
         self.llm = ChatOpenAI(
             openai_api_key=api_key,
             base_url="https://openrouter.ai/api/v1",
-            model="openai/gpt-3.5-turbo",  # Default model, can be overridden
+            model="tngtech/deepseek-r1t2-chimera:free",  # Default model, can be overridden
             temperature=0.7,  # Higher temperature for more varied feedback
             max_tokens=1000
         )
