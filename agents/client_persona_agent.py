@@ -183,13 +183,27 @@ Provide your feedback in the following JSON structure:
             )
             
             # Get the LLM response using ChatOpenAI
-            response = self.llm.invoke([
-                SystemMessage(content=f"You are a {persona_info['name']} providing feedback on a technical architecture."),
-                HumanMessage(content=prompt)
-            ])
-            
-            # Parse the response into a structured format
-            feedback = self._parse_feedback_response(response.content)
+            try:
+                response = self.llm.invoke([
+                    SystemMessage(content=f"""You are a {persona_info['name']} providing feedback on a technical architecture. 
+                    Always respond with a valid JSON object containing the feedback. Use the exact field names specified in the prompt.
+                    If you need to include any markdown formatting, use a markdown code block with JSON syntax highlighting (```json)."""),
+                    HumanMessage(content=prompt)
+                ])
+                
+                # Ensure we have content to parse
+                if not response or not response.content:
+                    raise ValueError("Empty response from LLM")
+                
+                # Log the raw response for debugging
+                logger.debug(f"Raw LLM response: {response.content}")
+                
+                # Parse the response into a structured format
+                feedback = self._parse_feedback_response(response.content)
+                
+            except Exception as e:
+                logger.error(f"Error getting response from LLM: {str(e)}", exc_info=True)
+                return self._get_fallback_feedback(architecture, f"Error getting response from LLM: {str(e)}")
             
             # Add metadata
             feedback["metadata"] = {
@@ -204,6 +218,64 @@ Provide your feedback in the following JSON structure:
             logger.error(f"Error in ClientPersonaAgent: {str(e)}", exc_info=True)
             return self._get_fallback_feedback(architecture, str(e))
     
+    def _extract_json_from_response(self, response: str) -> str:
+        """Extract JSON string from various response formats."""
+        # If response is already a dict, return it as is
+        if isinstance(response, dict):
+            return json.dumps(response)
+            
+        # Handle markdown code blocks
+        if '```' in response:
+            # Extract content between ```json and ```
+            if '```json' in response:
+                json_str = response.split('```json')[1].split('```')[0].strip()
+            else:
+                # Try with just ```
+                json_str = response.split('```')[1].split('```')[0].strip()
+                # Remove language identifier if present (e.g., ```python)
+                if '\n' in json_str:
+                    first_line = json_str.split('\n')[0]
+                    if not first_line.strip().startswith('{'):
+                        json_str = '\n'.join(json_str.split('\n')[1:])
+            return json_str.strip()
+            
+        # Try to extract JSON from the response
+        json_start = response.find('{')
+        json_end = response.rfind('}') + 1
+        
+        if json_start == -1 or json_end == 0:
+            raise ValueError("No JSON object found in response")
+            
+        return response[json_start:json_end].strip()
+    
+    def _clean_json_string(self, json_str: str) -> str:
+        """Clean and fix common JSON formatting issues."""
+        # Remove any control characters
+        json_str = ''.join(char for char in json_str if ord(char) >= 32 or char in '\n\r\t')
+        
+        # Fix common JSON issues
+        lines = []
+        in_string = False
+        escape = False
+        
+        for char in json_str:
+            if char == '"' and not escape:
+                in_string = not in_string
+                lines.append(char)
+            elif char == '\\' and in_string:
+                escape = not escape
+                lines.append(char)
+            elif char in ['\n', '\r', '\t'] and in_string:
+                # Escape newlines and tabs in strings
+                lines.append(f'\\{char}')
+                escape = False
+            else:
+                if escape:
+                    escape = False
+                lines.append(char)
+        
+        return ''.join(lines)
+    
     def _parse_feedback_response(self, response: str) -> Dict[str, Any]:
         """
         Parse the LLM response into a structured feedback dictionary.
@@ -214,30 +286,67 @@ Provide your feedback in the following JSON structure:
         Returns:
             Parsed feedback dictionary
         """
+        if not response:
+            return self._get_fallback_feedback({}, "Empty response received")
+        
         try:
-            # Clean the response to extract just the JSON portion
-            json_start = response.find('{')
-            json_end = response.rfind('}') + 1
+            # First, try to parse as-is (in case it's already a dict or well-formed JSON)
+            if isinstance(response, dict):
+                feedback = response
+            else:
+                try:
+                    feedback = json.loads(response)
+                except json.JSONDecodeError:
+                    # If direct parsing fails, try to extract and clean JSON
+                    json_str = self._extract_json_from_response(response)
+                    json_str = self._clean_json_string(json_str)
+                    feedback = json.loads(json_str)
             
-            if json_start == -1 or json_end == 0:
-                raise ValueError("No JSON object found in response")
-                
-            json_str = response[json_start:json_end]
+            # Ensure we have a dictionary
+            if not isinstance(feedback, dict):
+                raise ValueError("Response is not a JSON object")
             
-            # Parse the JSON
-            feedback = json.loads(json_str)
+            # Define default values for all required fields
+            required_fields = {
+                "feedback_summary": "No summary provided",
+                "strengths": [],
+                "concerns": [],
+                "suggestions": [],
+                "additional_requirements": [],
+                "overall_rating": 3,
+                "confidence_in_rating": 3,
+                "follow_up_questions": []
+            }
             
-            # Ensure all required fields exist
-            required_fields = ["feedback_summary", "strengths", "concerns", "suggestions"]
-            for field in required_fields:
-                if field not in feedback:
-                    feedback[field] = [f"No {field.replace('_', ' ')} provided"]
+            # Initialize result with default values
+            result = {**required_fields}
             
-            return feedback
+            # Update with actual values from the parsed JSON
+            for key, default_value in required_fields.items():
+                if key in feedback:
+                    # Handle different field types appropriately
+                    if key in ["strengths", "concerns", "suggestions", "additional_requirements", "follow_up_questions"]:
+                        # Ensure these are lists
+                        if isinstance(feedback[key], str):
+                            result[key] = [feedback[key]]
+                        elif isinstance(feedback[key], (list, tuple)):
+                            result[key] = list(feedback[key])
+                        else:
+                            result[key] = [str(feedback[key])]
+                    else:
+                        # For other fields, use as-is or convert to string
+                        result[key] = feedback[key] if feedback[key] is not None else default_value
             
-        except (json.JSONDecodeError, ValueError, KeyError) as e:
-            logger.error(f"Failed to parse feedback response: {str(e)}")
-            return self._get_fallback_feedback({}, "Failed to parse feedback response")
+            # Add any additional fields from the feedback
+            for key, value in feedback.items():
+                if key not in required_fields:
+                    result[key] = value
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to parse feedback response: {str(e)}\nResponse: {response}", exc_info=True)
+            return self._get_fallback_feedback({}, f"Failed to parse feedback: {str(e)}")
     
     def _get_fallback_feedback(self, architecture: Dict[str, Any], error: str) -> Dict[str, Any]:
         """Return a fallback feedback in case of errors."""

@@ -109,31 +109,55 @@ async def process_request(request: ProcessRequest, background_tasks: BackgroundT
 @app.get("/status/{request_id}", response_model=RequestStatus)
 async def get_status(request_id: str):
     """Get the status of a processing request."""
-    if request_id not in request_store:
-        raise HTTPException(status_code=404, detail="Request ID not found")
-    
-    # Ensure all required fields are present in the response
-    status_info = request_store[request_id].copy()
-    
-    # Ensure request_id is included in the response
-    status_info["request_id"] = request_id
-    
-    # Ensure all required fields have default values if missing
-    required_fields = {
-        "status": "unknown",
-        "progress": 0,
-        "created_at": datetime.utcnow().isoformat(),
-        "updated_at": datetime.utcnow().isoformat(),
-        "message": "Status information available",
-        "result": {},
-        "error": None
-    }
-    
-    # Set default values for any missing required fields
-    for field, default in required_fields.items():
-        if field not in status_info or status_info[field] is None:
-            status_info[field] = default
-    
+    try:
+        logger.info(f"Fetching status for request_id: {request_id}")
+        
+        if not request_id or not isinstance(request_id, str):
+            raise HTTPException(status_code=400, detail="Invalid request ID format")
+            
+        if request_id not in request_store:
+            logger.warning(f"Request ID not found: {request_id}")
+            raise HTTPException(status_code=404, detail="Request ID not found")
+        
+        # Get a copy of the current status
+        status_info = request_store[request_id].copy()
+        
+        # Ensure request_id is included in the response
+        status_info["request_id"] = request_id
+        
+        # Ensure all required fields have default values if missing
+        required_fields = {
+            "status": "unknown",
+            "progress": 0,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "message": "Status information available",
+            "result": {},
+            "error": None
+        }
+        
+        # Set default values for any missing required fields
+        for field, default in required_fields.items():
+            if field not in status_info or status_info[field] is None:
+                status_info[field] = default
+        
+        # Log the status being returned (without the full result to avoid log spam)
+        log_info = status_info.copy()
+        if 'result' in log_info and log_info['result']:
+            log_info['result'] = "[result data present]"
+        logger.debug(f"Status for {request_id}: {log_info}")
+        
+        return status_info
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as they are
+        raise
+    except Exception as e:
+        logger.error(f"Error getting status for {request_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"An error occurred while fetching status: {str(e)}"
+        )
     return status_info
 
 @app.get("/results/{request_id}", response_model=RequestStatus)
